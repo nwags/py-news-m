@@ -1,0 +1,5 @@
+source_provider,document_id,publication,domain,article_url,headline,publish_date,lang,desk,author,body,abstract,description,metadata_json
+nyt,nyt-1,New York Times,nytimes.com,https://example.com/nyt-1,Fed Signals Pause,2024-01-02T10:00:00Z,en,business,Alex Roe,,A summary line,Short snippet,"{\"desk\": \"business\"}"
+reuters,reu-9,Reuters,reuters.com,https://example.com/reu-9,Oil Prices Rise,2024-01-03T12:00:00Z,en,energy,Sam Doe,Full text body,Another summary,Another snippet,
+,,Unknown Source,,https://example.com/no-provider,Untitled Row,2024-01-04T09:30:00Z,en,,, ,,
+,,,,,,,,,,,,,

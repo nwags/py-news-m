@@ -1,0 +1,48 @@
+{
+  "status": "OK",
+  "response": {
+    "docs": [
+      {
+        "_id": "nyt://article/11111111-1111-1111-1111-111111111111",
+        "uri": "nyt://article/11111111-1111-1111-1111-111111111111",
+        "web_url": "https://www.nytimes.com/2024/01/05/business/fed-policy.html",
+        "source": "The New York Times",
+        "headline": {
+          "main": "Fed Signals Patience as Inflation Cools",
+          "print_headline": "Fed Signals Patience"
+        },
+        "pub_date": "2024-01-05T13:15:00Z",
+        "language": "en",
+        "section_name": "Business Day",
+        "news_desk": "Business",
+        "byline": {
+          "original": "By Jane Doe"
+        },
+        "abstract": "Officials said rate decisions remain data-dependent.",
+        "snippet": "The central bank held rates steady.",
+        "keywords": [
+          {
+            "name": "subject",
+            "value": "Inflation"
+          }
+        ],
+        "word_count": 900
+      },
+      {
+        "uri": "nyt://article/22222222-2222-2222-2222-222222222222",
+        "web_url": "https://www.nytimes.com/2024/01/06/world/europe/election-night.html",
+        "headline": {
+          "print_headline": "Election Night Brings Coalition Talks"
+        },
+        "pub_date": "2024-01-06T22:00:00Z",
+        "news_desk": "Foreign",
+        "lead_paragraph": "Leaders met overnight to discuss coalition options.",
+        "multimedia": [],
+        "document_type": "article"
+      },
+      {
+        "multimedia": []
+      }
+    ]
+  }
+}

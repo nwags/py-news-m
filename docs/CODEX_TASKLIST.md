@@ -1,0 +1,33 @@
+# CODEX_TASKLIST.md
+
+## Current objective
+
+Reconciliation/Audit Tooling for Canonical Authorities vs Cache/Index State.
+
+## Current implemented foundation (unchanged by this phase)
+
+- Canonical normalized authorities under repo-root `refdata/normalized`.
+- Provider-aware local-first article/content resolution with explicit remote gating.
+- Canonical storage mapping and canonical current artifact index.
+- Append-only normalized resolution provenance.
+- Operator inspection surfaces for resolution/provenance/cache state.
+- Read-only audit/reconciliation CLI for canonical authorities vs cache/index state.
+
+## Next implementation phases (ordered)
+
+1. Operator maintenance/reporting hardening.
+2. Augmentation-ingestion transfer/design sync from accepted `py-sec-edgar-m`.
+3. Authenticated augmentation submission/storage.
+4. Entity-aware query/read behavior using stored augmentations.
+
+## Superseded direction
+
+- In-process extraction inside `py-news-m` is superseded by the external augmentation producer model.
+- Augmentation implementation direction in this repo follows transfer/design sync from accepted `py-sec-edgar-m` once approved.
+
+## Deferred
+
+- Authenticated augmentation submission API (future phase).
+- Canonical augmentation storage/query surfaces (future phase).
+- Entity-aware query behavior using stored augmentations (future phase).
+- Monitor/reconciliation runtime redesign.

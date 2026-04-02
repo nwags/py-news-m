@@ -1,0 +1,4 @@
+{"source_provider":"nyt","document_id":"nyt-1","publication":"New York Times","domain":"nytimes.com","article_url":"https://example.com/nyt-1","headline":"Fed Signals Pause","publish_date":"2024-01-02T10:00:00Z","lang":"en","desk":"business","author":"Alex Roe","abstract":"A summary line","description":"Short snippet"}
+{"source_provider":"reuters","document_id":"reu-9","publication":"Reuters","domain":"reuters.com","article_url":"https://example.com/reu-9","headline":"Oil Prices Rise","publish_date":"2024-01-03T12:00:00Z","lang":"en","desk":"energy","author":"Sam Doe","body":"Full text body","abstract":"Another summary","description":"Another snippet"}
+{"publication":"Fallback Source","article_url":"https://example.com/fallback-only","headline":"Fallback Identity","publish_date":"2024-01-05T00:00:00Z","lang":"en"}
+{"source_provider":"   ","document_id":"   ","publication":"   ","headline":"   "}

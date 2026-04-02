@@ -1,0 +1,2 @@
+source_provider,document_id,publication,domain,article_url,headline,publish_date,lang,desk,author,body,abstract,description
+manual,manual-1,Example Domain,example.com,https://example.com,Example Domain,2026-03-30T00:00:00Z,en,testing,OpenAI,,Manual test summary,Manual test snippet

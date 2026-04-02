@@ -1,0 +1,45 @@
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+
+# Local secrets / env
+.env
+.env.*
+
+# Local generated runtime data
+.news_cache/
+refdata/normalized/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+*.parquet
+.codex
+snapshot_v*.md
+
+data/*.pkl
+data/*.parquet
+data/*.csv
+!data/README.md
+!data/*.example.csvdata/*

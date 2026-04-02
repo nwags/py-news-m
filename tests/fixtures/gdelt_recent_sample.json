@@ -1,0 +1,23 @@
+{
+  "articles": [
+    {
+      "url": "https://example.com/gdelt/a1",
+      "title": "Central Bank Signals Policy Shift",
+      "seendate": "20260305123000",
+      "domain": "example.com",
+      "language": "English",
+      "description": "A short policy summary"
+    },
+    {
+      "sourceurl": "https://example.com/gdelt/a2",
+      "headline": "Oil Markets React",
+      "published_at": "2026-03-05T08:10:00Z",
+      "source_domain": "markets.example.org",
+      "lang": "en",
+      "snippet": "Energy desks watch supply changes"
+    },
+    {
+      "title": "   "
+    }
+  ]
+}
