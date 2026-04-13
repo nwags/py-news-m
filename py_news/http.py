@@ -48,6 +48,9 @@ class HttpClient:
         self.max_attempts = max(1, max_attempts)
         self.backoff_seconds = max(0.0, backoff_seconds)
         self.sleep_fn = sleep_fn or time.sleep
+        self.last_attempts: int = 0
+        self.last_status_code: int | None = None
+        self.last_rate_limited: bool = False
 
     def request_json(
         self,
@@ -127,6 +130,9 @@ class HttpClient:
                 if is_transient and attempt < self.max_attempts:
                     self.sleep_fn(self.backoff_seconds * attempt)
                     continue
+                self.last_attempts = attempt
+                self.last_status_code = None
+                self.last_rate_limited = False
                 raise HttpFailure(
                     method=method,
                     url=url,
@@ -142,6 +148,9 @@ class HttpClient:
                     self.sleep_fn(self.backoff_seconds * attempt)
                     continue
 
+                self.last_attempts = attempt
+                self.last_status_code = response.status_code
+                self.last_rate_limited = response.status_code == 429
                 raise HttpFailure(
                     method=method,
                     url=url,
@@ -151,8 +160,14 @@ class HttpClient:
                     is_transient=is_transient,
                 )
 
+            self.last_attempts = attempt
+            self.last_status_code = response.status_code
+            self.last_rate_limited = False
             return response, attempt
 
+        self.last_attempts = attempt
+        self.last_status_code = None
+        self.last_rate_limited = False
         raise HttpFailure(
             method=method,
             url=url,

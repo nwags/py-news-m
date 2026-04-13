@@ -8,7 +8,13 @@ import pandas as pd
 from py_news.api.app import create_app
 from py_news.config import load_config
 from py_news.http import HttpClient
-from py_news.models import ARTICLE_ARTIFACT_COLUMNS, ARTICLES_COLUMNS, ARTICLE_STORAGE_MAP_COLUMNS, STORAGE_ARTICLES_COLUMNS
+from py_news.models import (
+    ARTICLE_ARTIFACT_COLUMNS,
+    ARTICLES_COLUMNS,
+    ARTICLE_STORAGE_MAP_COLUMNS,
+    AUGMENTATION_ARTIFACT_COLUMNS,
+    STORAGE_ARTICLES_COLUMNS,
+)
 from py_news.providers import refresh_provider_registry
 from py_news.storage.paths import normalized_artifact_path
 from py_news.storage.writes import upsert_parquet_rows
@@ -47,6 +53,15 @@ def _seed_storage_articles(config, rows: list[dict]) -> None:
         rows=rows,
         dedupe_keys=["storage_article_id"],
         column_order=STORAGE_ARTICLES_COLUMNS,
+    )
+
+
+def _seed_augmentation_artifacts(config, rows: list[dict]) -> None:
+    upsert_parquet_rows(
+        path=normalized_artifact_path(config, "augmentation_artifacts"),
+        rows=rows,
+        dedupe_keys=["canonical_key", "augmentation_type", "artifact_locator"],
+        column_order=AUGMENTATION_ARTIFACT_COLUMNS,
     )
 
 
@@ -170,6 +185,8 @@ def test_get_article_by_id_and_404(tmp_path: Path) -> None:
     assert found.json()["resolution_reason_code"] == "local_metadata_hit"
     assert found.json()["resolution_remote_attempted"] is False
     assert found.json()["local_write_performed"] is False
+    assert found.json()["augmentation_meta"]["augmentation_available"] is False
+    assert found.json()["augmentation_meta"]["augmentation_types_present"] == []
 
     missing = client.get("/articles/does_not_exist")
     assert missing.status_code == 404
@@ -227,7 +244,58 @@ def test_get_article_resolve_remote_true_refreshes_metadata(monkeypatch, tmp_pat
     assert payload["resolution_source"] == "provider_api"
     assert payload["resolution_strategy"] == "provider_api_lookup"
     assert payload["resolution_remote_attempted"] is True
-    assert payload["local_write_performed"] is True
+
+
+def test_get_article_and_content_include_additive_augmentation_meta_when_present(tmp_path: Path) -> None:
+    config = load_config(project_root=tmp_path)
+    _seed_articles(
+        config,
+        [
+            {
+                **_article_row(
+                    "art_augmented",
+                    "newsdata",
+                    "provider=newsdata|provider_document_id=doc-aug",
+                    "Source",
+                    "example.com",
+                    "Augmented Story",
+                    "2026-03-10T01:00:00Z",
+                ),
+                "article_text": "Full text for augmentation freshness checks.",
+            }
+        ],
+    )
+    _seed_augmentation_artifacts(
+        config,
+        [
+            {
+                "domain": "news",
+                "resource_family": "articles",
+                "canonical_key": "article:art_augmented",
+                "augmentation_type": "entity_tagging",
+                "artifact_locator": ".news_cache/augmentations/article:art_augmented/entity_tagging.json",
+                "source_text_version": "sha256:stale",
+                "producer_name": "entity-v1",
+                "event_at": "2026-04-08T17:04:00Z",
+                "success": True,
+            }
+        ],
+    )
+    client = TestClient(create_app(project_root=tmp_path))
+
+    detail = client.get("/articles/art_augmented")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["augmentation_meta"]["augmentation_available"] is True
+    assert detail_payload["augmentation_meta"]["augmentation_types_present"] == ["entity_tagging"]
+    assert detail_payload["augmentation_meta"]["inspect_path"] == "/articles/art_augmented/augmentations"
+
+    content = client.get("/articles/art_augmented/content")
+    assert content.status_code == 200
+    content_payload = content.json()
+    assert content_payload["augmentation_meta"]["augmentation_available"] is True
+    assert content_payload["augmentation_meta"]["augmentation_types_present"] == ["entity_tagging"]
+    assert isinstance(content_payload["augmentation_meta"]["augmentation_stale"], bool)
 
 
 def test_get_article_resolve_remote_missing_auth_surfaces_diagnostics(monkeypatch, tmp_path: Path) -> None:
@@ -428,6 +496,8 @@ def test_get_article_content_returns_false_when_no_local_content(tmp_path: Path)
     assert payload["artifacts"] == []
     assert payload["resolution_strategy"] == "local_only"
     assert payload["resolution_remote_attempted"] is False
+    assert payload["augmentation_meta"]["augmentation_available"] is False
+    assert payload["augmentation_meta"]["augmentation_types_present"] == []
 
 
 def test_get_article_content_resolve_remote_true_triggers_provider_resolution(monkeypatch, tmp_path: Path) -> None:

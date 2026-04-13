@@ -59,6 +59,13 @@ Rules:
 - `refdata/normalized/article_storage_map.parquet`
 - `refdata/normalized/local_lookup_articles.parquet`
 - `refdata/normalized/resolution_events.parquet` (append-only)
+- `refdata/normalized/augmentation_runs.parquet` (Wave 3 outer metadata)
+- `refdata/normalized/augmentation_events.parquet` (Wave 3 outer metadata)
+- `refdata/normalized/augmentation_artifacts.parquet` (Wave 3 outer metadata)
+
+Wave 4 pilot note:
+- producer artifact payload bodies are bounded by inline-size policy,
+- larger payloads may be persisted as locator-backed sidecars under cache-controlled augmentation paths.
 
 ## Design Rules
 

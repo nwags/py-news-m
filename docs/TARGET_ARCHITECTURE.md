@@ -23,12 +23,15 @@ Provider-aware, local-first article ingestion/retrieval with canonical normalize
 - Append-only normalized resolution provenance in `resolution_events.parquet`.
 - Read-only reconciliation/audit tooling to inspect canonical authorities and cache/index state consistency.
 - Rebuild/cleanup/repair remain explicit separate operator commands, not part of audit commands.
+- Current near-term implementation focus: operator maintenance/reporting hardening on top of the implemented read-only audit surface.
 
 5. Future Augmentation Plane (Not Yet Implemented)
 - External augmentation producer reads `py-news-m` read APIs.
 - External producer performs entity and temporal-expression extraction.
+- Wave 3 now includes canonical outer augmentation metadata artifacts and read-only inspection surfaces.
+- Wave 4 pilot now includes bounded producer envelope submission/read-back on `m-cache news aug ...`.
 - Future authenticated augmentation submission into `py-news-m`.
-- Canonical augmentation storage inside `py-news-m`.
+- Canonical augmentation payload storage inside `py-news-m`.
 - Future entity-aware query behavior using stored augmentations.
 - Expected design transfer from accepted `py-sec-edgar-m` augmentation pattern after transfer/design sync.
 
@@ -45,4 +48,4 @@ See [`docs/AUGMENTATION_DIRECTION.md`](AUGMENTATION_DIRECTION.md).
 - No in-process extraction/NLP inside `py-news-m`.
 - No authenticated augmentation write API in this phase.
 - No entity-aware query implementation in this phase.
-- No monitor/reconciliation redesign in this phase (next work is bounded audit/reconciliation/operator hardening).
+- No monitor/reconciliation runtime redesign in this phase.

@@ -10,11 +10,13 @@ from typing import Any
 import pandas as pd
 
 from py_news.api.models import (
+    ApiAugmentationMetaResponse,
     ArticleContentArtifactResponse,
     ArticleContentResponse,
     ArticleSummaryResponse,
     ArticlesListResponse,
 )
+from py_news.augmentation import api_augmentation_meta_for_article
 from py_news.config import AppConfig
 from py_news.models import ARTICLE_ARTIFACT_COLUMNS, ARTICLES_COLUMNS
 from py_news.cache_layout import mapped_article_ids_for_storage, mapped_storage_id_for_article
@@ -104,6 +106,7 @@ class ApiService:
         if matches.empty:
             return None
         row = matches.iloc[0]
+        augmentation_meta = api_augmentation_meta_for_article(self.config, article_id=article_id, text_source="metadata")
         return ArticleSummaryResponse(
             article_id=str(row.get("article_id") or ""),
             provider=str(row.get("provider") or ""),
@@ -129,6 +132,15 @@ class ApiService:
             resolution_auth_configured=resolution.auth_configured if resolution else None,
             resolution_remote_attempted=bool(resolve_remote_enabled),
             local_write_performed=resolution.local_write_performed if resolution else False,
+            resolution_mode=resolution.resolution_mode if resolution else "local_only",
+            resolution_provider_requested=resolution.provider_requested if resolution else None,
+            resolution_provider_used=resolution.provider_used if resolution else _optional_str(row.get("provider")),
+            resolution_served_from=resolution.served_from if resolution else "local_normalized",
+            resolution_persisted_locally=resolution.local_write_performed if resolution else False,
+            resolution_rate_limited=resolution.rate_limited if resolution else False,
+            resolution_retry_count=resolution.retry_count if resolution else 0,
+            resolution_deferred_until=resolution.deferred_until if resolution else None,
+            augmentation_meta=_to_api_augmentation_meta_response(augmentation_meta),
         )
 
     def article_exists(self, article_id: str) -> bool:
@@ -158,6 +170,7 @@ class ApiService:
             if not storage_matches.empty:
                 matches = pd.concat([matches, storage_matches], ignore_index=True).drop_duplicates()
         if matches.empty:
+            augmentation_meta = api_augmentation_meta_for_article(self.config, article_id=article_id, text_source="content")
             return ArticleContentResponse(
                 article_id=article_id,
                 content_available=False,
@@ -171,6 +184,15 @@ class ApiService:
                 resolution_auth_configured=resolution.auth_configured if resolution else None,
                 resolution_remote_attempted=bool(resolve_remote_enabled),
                 local_write_performed=resolution.local_write_performed if resolution else False,
+                resolution_mode=resolution.resolution_mode if resolution else "local_only",
+                resolution_provider_requested=resolution.provider_requested if resolution else None,
+                resolution_provider_used=resolution.provider_used if resolution else None,
+                resolution_served_from=resolution.served_from if resolution else "none",
+                resolution_persisted_locally=resolution.local_write_performed if resolution else False,
+                resolution_rate_limited=resolution.rate_limited if resolution else False,
+                resolution_retry_count=resolution.retry_count if resolution else 0,
+                resolution_deferred_until=resolution.deferred_until if resolution else None,
+                augmentation_meta=_to_api_augmentation_meta_response(augmentation_meta),
                 artifacts=[],
             )
 
@@ -204,6 +226,7 @@ class ApiService:
                 preferred_text = path_obj.read_text(encoding="utf-8")
 
         content_available = any(artifact.file_exists for artifact in artifact_models)
+        augmentation_meta = api_augmentation_meta_for_article(self.config, article_id=article_id, text_source="content")
         return ArticleContentResponse(
             article_id=article_id,
             content_available=content_available,
@@ -217,6 +240,15 @@ class ApiService:
             resolution_auth_configured=resolution.auth_configured if resolution else None,
             resolution_remote_attempted=bool(resolve_remote_enabled),
             local_write_performed=resolution.local_write_performed if resolution else False,
+            resolution_mode=resolution.resolution_mode if resolution else "local_only",
+            resolution_provider_requested=resolution.provider_requested if resolution else None,
+            resolution_provider_used=resolution.provider_used if resolution else _optional_str(matches.iloc[0].get("provider")),
+            resolution_served_from=resolution.served_from if resolution else "local_cache",
+            resolution_persisted_locally=resolution.local_write_performed if resolution else False,
+            resolution_rate_limited=resolution.rate_limited if resolution else False,
+            resolution_retry_count=resolution.retry_count if resolution else 0,
+            resolution_deferred_until=resolution.deferred_until if resolution else None,
+            augmentation_meta=_to_api_augmentation_meta_response(augmentation_meta),
             artifacts=artifact_models,
         )
 
@@ -288,3 +320,13 @@ def _optional_str(value: Any) -> str | None:
     if lowered in {"nan", "nat"}:
         return None
     return text
+
+
+def _to_api_augmentation_meta_response(meta: Any) -> ApiAugmentationMetaResponse:
+    return ApiAugmentationMetaResponse(
+        augmentation_available=bool(getattr(meta, "augmentation_available", False)),
+        augmentation_types_present=list(getattr(meta, "augmentation_types_present", [])),
+        last_augmented_at=getattr(meta, "last_augmented_at", None),
+        augmentation_stale=getattr(meta, "augmentation_stale", None),
+        inspect_path=getattr(meta, "inspect_path", None),
+    )

@@ -1,0 +1,14 @@
+{
+  "candidate_tag": "v0.1.0-rc7",
+  "repo": "py-news-m",
+  "release_role": "pilot_consumer_validator",
+  "pin_confirmed": true,
+  "validation_status": "fail",
+  "signoff_state": "block",
+  "blockers": [
+    "B002_VALIDATION_FAILURE",
+    "B006_CLI_API_SEMANTIC_DRIFT"
+  ],
+  "warnings": [],
+  "rollback_ready": true
+}

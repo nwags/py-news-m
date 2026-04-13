@@ -26,6 +26,10 @@ This repo does not currently implement entity/temporal extraction adapters.
 Entity/temporal tagging is expected to be produced by an external augmentation producer service in a future augmentation flow, then submitted back through future authenticated augmentation submission surfaces.
 That augmentation flow is expected to follow the accepted `py-sec-edgar-m` pattern after transfer/design sync.
 
+Wave 3 adds read-only/planning-first augmentation metadata surfaces only for text-bearing article resources.
+Operational metadata families (provider registry, lookup artifacts, audit/reconciliation artifacts) remain non-augmentation.
+Wave 4 pilot adds bounded producer envelope submission/read-back for those same text-bearing article resources only.
+
 ## Provider capability modeling
 
 Capability/rule truth is stored in `provider_registry.parquet` and used at runtime.
@@ -43,5 +47,6 @@ Direct URL fetch is rule-controlled fallback, not default for all providers.
 
 ## Near-term direction
 
-Next implementation direction is audit/reconciliation/operator hardening.
+Read-only audit/reconciliation is implemented.
+Next implementation direction is operator maintenance/reporting hardening.
 Augmentation ingestion transfer/design sync from accepted `py-sec-edgar-m` follows that.

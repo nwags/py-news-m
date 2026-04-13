@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["py_news*"]
+include = ["py_news*", "m_cache_shared*"]
 
 [project]
 name = "py-news-m"
@@ -27,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 py-news = "py_news.cli:cli"
+m-cache = "py_news.m_cache_cli:m_cache_cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

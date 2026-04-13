@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 from datetime import date
+import hashlib
 import json
 from pathlib import Path
+import re
+import shutil
+from typing import Any
 
 import click
 import pandas as pd
 import uvicorn
 
-from py_news.audit import run_audit_article, run_audit_cache, run_audit_provider, run_audit_summary
+from py_news.audit import (
+    audit_status_brief,
+    compare_audit_reports,
+    render_audit_compare_human,
+    render_audit_human,
+    render_audit_report_ndjson,
+    run_audit_article,
+    run_audit_cache,
+    run_audit_provider,
+    run_audit_report,
+    run_audit_summary,
+)
 from py_news.config import AppConfig, load_config
 from py_news.cache_layout import (
     mapped_article_ids_for_storage,
@@ -388,7 +403,7 @@ def audit_summary(ctx: click.Context, summary_json: bool) -> None:
     if summary_json:
         click.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
-    click.echo(render_summary_block("Audit Summary", payload))
+    click.echo(render_audit_human(payload, title="Audit Summary"))
 
 
 @audit_group.command("cache")
@@ -399,7 +414,7 @@ def audit_cache(ctx: click.Context, summary_json: bool) -> None:
     if summary_json:
         click.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
-    click.echo(render_summary_block("Audit Cache", payload))
+    click.echo(render_audit_human(payload, title="Audit Cache"))
 
 
 @audit_group.command("article")
@@ -411,7 +426,7 @@ def audit_article(ctx: click.Context, article_id: str, as_json: bool) -> None:
     if as_json:
         click.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
-    click.echo(render_summary_block("Audit Article", payload))
+    click.echo(render_audit_human(payload, title="Audit Article"))
 
 
 @audit_group.command("provider")
@@ -423,7 +438,157 @@ def audit_provider(ctx: click.Context, provider_id: str, as_json: bool) -> None:
     if as_json:
         click.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
-    click.echo(render_summary_block("Audit Provider", payload))
+    click.echo(render_audit_human(payload, title="Audit Provider"))
+
+
+@audit_group.command("report")
+@click.option("--json", "as_json", is_flag=True, default=False, show_default=True)
+@click.option("--ndjson", is_flag=True, default=False, show_default=True)
+@click.option("--output", type=click.Path(path_type=Path, dir_okay=False, file_okay=True), default=None)
+@click.pass_context
+def audit_report(ctx: click.Context, as_json: bool, ndjson: bool, output: Path | None) -> None:
+    if as_json and ndjson:
+        raise click.UsageError("Choose only one of --json or --ndjson")
+
+    payload = run_audit_report(_config(ctx))
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if ndjson:
+            output.write_text(render_audit_report_ndjson(payload), encoding="utf-8")
+        else:
+            output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    if ndjson:
+        click.echo(render_audit_report_ndjson(payload))
+        return
+    if as_json:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    click.echo(render_audit_human(payload, title="Audit Report"))
+
+
+@audit_group.command("compare")
+@click.option("--left", "left_path", required=True, type=click.Path(path_type=Path, exists=True, dir_okay=False, file_okay=True))
+@click.option("--right", "right_path", required=True, type=click.Path(path_type=Path, exists=True, dir_okay=False, file_okay=True))
+@click.option("--json", "as_json", is_flag=True, default=False, show_default=True)
+def audit_compare(left_path: Path, right_path: Path, as_json: bool) -> None:
+    left_report = json.loads(left_path.read_text(encoding="utf-8"))
+    right_report = json.loads(right_path.read_text(encoding="utf-8"))
+    payload = compare_audit_reports(
+        left_report=left_report,
+        right_report=right_report,
+        left_label=str(left_path.resolve()),
+        right_label=str(right_path.resolve()),
+    )
+    if as_json:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    click.echo(render_audit_compare_human(payload))
+
+
+@audit_group.command("bundle")
+@click.option("--output-dir", required=True, type=click.Path(path_type=Path, file_okay=False, dir_okay=True))
+@click.option("--overwrite", is_flag=True, default=False, show_default=True)
+@click.option("--include-ndjson", is_flag=True, default=False, show_default=True)
+@click.option("--article-id", "article_ids", multiple=True)
+@click.option("--provider", "provider_ids", multiple=True)
+@click.pass_context
+def audit_bundle(
+    ctx: click.Context,
+    output_dir: Path,
+    overwrite: bool,
+    include_ndjson: bool,
+    article_ids: tuple[str, ...],
+    provider_ids: tuple[str, ...],
+) -> None:
+    config = _config(ctx)
+    output_dir = output_dir.resolve()
+    _prepare_bundle_dir(output_dir, overwrite=overwrite)
+
+    requested_providers = _dedupe_sorted(provider_ids)
+    requested_articles = _dedupe_sorted(article_ids)
+
+    canonical_provider_ids = _canonical_provider_ids(config)
+    if requested_providers:
+        unknown = sorted([provider for provider in requested_providers if provider not in canonical_provider_ids])
+        if unknown:
+            raise click.UsageError(f"Unknown provider IDs: {', '.join(unknown)}")
+        export_provider_ids = requested_providers
+    else:
+        export_provider_ids = canonical_provider_ids
+
+    summary_payload = run_audit_summary(config)
+    cache_payload = run_audit_cache(config)
+    report_payload = run_audit_report(config)
+    status_brief = audit_status_brief(report_payload)
+
+    written_payloads: dict[str, Any] = {
+        "audit_summary.json": summary_payload,
+        "audit_cache.json": cache_payload,
+        "audit_report.json": report_payload,
+    }
+    if include_ndjson:
+        written_payloads["audit_report.ndjson"] = render_audit_report_ndjson(report_payload)
+
+    provider_safe = _safe_name_map(export_provider_ids)
+    for provider_id in export_provider_ids:
+        payload = run_audit_provider(config, provider_id=provider_id)
+        filename = f"audit_provider_{provider_safe[provider_id]}.json"
+        written_payloads[filename] = payload
+
+    article_safe = _safe_name_map(requested_articles)
+    for article_id in requested_articles:
+        payload = run_audit_article(config, article_id=article_id)
+        filename = f"audit_article_{article_safe[article_id]}.json"
+        written_payloads[filename] = payload
+
+    for name in sorted(written_payloads):
+        path = output_dir / name
+        value = written_payloads[name]
+        if name.endswith(".ndjson"):
+            path.write_text(str(value) + "\n", encoding="utf-8")
+        else:
+            path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    manifest = {
+        "stage": "audit_bundle",
+        "generated_at": report_payload.get("generated_at"),
+        "repo_root": report_payload.get("repo_root"),
+        "arguments": {
+            "output_dir": str(output_dir),
+            "overwrite": bool(overwrite),
+            "include_ndjson": bool(include_ndjson),
+            "provider_ids": export_provider_ids,
+            "article_ids": requested_articles,
+        },
+        "status": status_brief["status"],
+        "ok": status_brief["ok"],
+        "hard_failure_count": status_brief["hard_failure_count"],
+        "warning_count": status_brief["warning_count"],
+        "observation_count": status_brief["observation_count"],
+        "files_written": sorted([*written_payloads.keys(), "manifest.json", "SUMMARY.txt"]),
+    }
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (output_dir / "SUMMARY.txt").write_text(
+        _bundle_summary_text(
+            report_payload=report_payload,
+            manifest=manifest,
+            provider_files=sorted([name for name in written_payloads if name.startswith("audit_provider_")]),
+            article_files=sorted([name for name in written_payloads if name.startswith("audit_article_")]),
+            next_actions=status_brief["next_actions"],
+        ),
+        encoding="utf-8",
+    )
+
+    click.echo(f"output_dir: {output_dir}")
+    click.echo(f"status: {status_brief['status']}")
+    click.echo(f"files_written: {len(manifest['files_written'])}")
+    click.echo(f"hard_failures_present: {status_brief['hard_failure_count'] > 0}")
+    if status_brief["hard_failure_count"] > 0 and status_brief["next_actions"]:
+        click.echo("next_actions:")
+        for action in status_brief["next_actions"]:
+            click.echo(f"- {action}")
 
 
 @cli.group("cache")
@@ -564,3 +729,81 @@ def _publisher_slug_from_row(row: dict) -> str:
     if source_name:
         return source_name
     return _safe_text(row.get("provider")) or "unknown"
+
+
+def _prepare_bundle_dir(path: Path, *, overwrite: bool) -> None:
+    if path.exists() and not path.is_dir():
+        raise click.UsageError(f"--output-dir must be a directory path: {path}")
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+        return
+    existing = list(path.iterdir())
+    if not existing:
+        return
+    if not overwrite:
+        raise click.UsageError(f"Output directory is not empty: {path} (use --overwrite)")
+    for child in existing:
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
+def _dedupe_sorted(values: tuple[str, ...]) -> list[str]:
+    cleaned = [value.strip() for value in values if value and value.strip()]
+    return sorted(set(cleaned))
+
+
+def _canonical_provider_ids(config: AppConfig) -> list[str]:
+    providers = load_provider_registry(config)
+    if providers.empty:
+        return []
+    return sorted({str(value).strip() for value in providers["provider_id"].tolist() if str(value).strip()})
+
+
+def _safe_name_map(raw_values: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    used: set[str] = set()
+    for raw in sorted(raw_values):
+        base = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._-") or "value"
+        safe = base
+        if safe in used:
+            digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+            safe = f"{base}_{digest}"
+        used.add(safe)
+        out[raw] = safe
+    return out
+
+
+def _bundle_summary_text(
+    *,
+    report_payload: dict[str, Any],
+    manifest: dict[str, Any],
+    provider_files: list[str],
+    article_files: list[str],
+    next_actions: list[str],
+) -> str:
+    lines = ["Audit Bundle Summary", "===================="]
+    lines.append(f"status: {manifest['status']}")
+    lines.append(f"ok: {manifest['ok']}")
+    lines.append(f"hard_failures_present: {manifest['hard_failure_count'] > 0}")
+    lines.append(f"generated_at: {manifest['generated_at']}")
+    lines.append("")
+    lines.append("Key row counts")
+    lines.append("--------------")
+    for key in ("articles_rows", "lookup_rows", "mapping_rows", "storage_rows", "artifact_rows", "resolution_events_rows"):
+        lines.append(f"{key}: {report_payload.get(key)}")
+    lines.append("")
+    lines.append(f"provider_files_included: {len(provider_files)}")
+    if provider_files:
+        lines.append(", ".join(provider_files))
+    lines.append(f"article_files_included: {len(article_files)}")
+    if article_files:
+        lines.append(", ".join(article_files))
+    if manifest["hard_failure_count"] > 0 and next_actions:
+        lines.append("")
+        lines.append("Next actions")
+        lines.append("------------")
+        for action in next_actions:
+            lines.append(f"- {action}")
+    return "\n".join(lines) + "\n"

@@ -32,10 +32,10 @@ class NewsDataSize:
 
 
 def resolve_newsdata_auth(rule: ProviderRule | None) -> NewsDataAuth:
-    auth_type = (rule.auth_type if rule and rule.auth_type else "api_key").strip().lower()
+    auth_type = (rule.auth_type if rule and rule.auth_type else "api_key_query").strip().lower()
     auth_env_var = (rule.auth_env_var if rule and rule.auth_env_var else NEWSDATA_DEFAULT_AUTH_ENV_VAR).strip()
     auth_value = ""
-    if auth_type == "api_key" and auth_env_var:
+    if auth_type in {"api_key", "api_key_query"} and auth_env_var:
         import os
 
         auth_value = os.getenv(auth_env_var, "").strip()
@@ -70,7 +70,7 @@ def build_newsdata_params(
         "language": NEWSDATA_DEFAULT_LANGUAGE,
         "size": size.effective_max_records,
     }
-    if auth.auth_type == "api_key" and auth.auth_configured:
+    if auth.auth_type in {"api_key", "api_key_query"} and auth.auth_configured:
         params["apikey"] = auth.auth_value
     return params, size
 

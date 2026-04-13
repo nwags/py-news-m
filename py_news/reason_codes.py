@@ -23,6 +23,10 @@ NO_PERMITTED_OR_SUCCESSFUL_STRATEGY = "no_permitted_or_successful_strategy"
 MISSING_URL = "missing_url"
 AUTH_NOT_CONFIGURED = "auth_not_configured"
 AUTH_INVALID_OR_MISSING = "auth_invalid_or_missing"
+MODE_UNSUPPORTED = "mode_unsupported"
+QUOTA_LIMITED = "quota_limited"
+RETRY_EXHAUSTED = "retry_exhausted"
+DEFERRED = "deferred"
 
 ALL_REASON_CODES = {
     LOCAL_METADATA_HIT,
@@ -46,4 +50,8 @@ ALL_REASON_CODES = {
     MISSING_URL,
     AUTH_NOT_CONFIGURED,
     AUTH_INVALID_OR_MISSING,
+    MODE_UNSUPPORTED,
+    QUOTA_LIMITED,
+    RETRY_EXHAUSTED,
+    DEFERRED,
 }

@@ -1,0 +1,11 @@
+{
+  "candidate_tag": "v0.1.0-rc9",
+  "repo": "py-news-m",
+  "release_role": "pilot_consumer_validator",
+  "pin_confirmed": true,
+  "validation_status": "pass",
+  "signoff_state": "pass",
+  "blockers": [],
+  "warnings": [],
+  "rollback_ready": true
+}

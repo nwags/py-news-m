@@ -18,6 +18,15 @@ def test_cli_help_shape():
         assert command in result.output
 
 
+def test_cli_audit_help_includes_report_and_compare():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["audit", "--help"])
+    assert result.exit_code == 0
+    assert "report" in result.output
+    assert "compare" in result.output
+    assert "bundle" in result.output
+
+
 def test_cli_import_refresh_and_query_json(tmp_path):
     runner = CliRunner()
     dataset = FIXTURES / "articles_sample.csv"

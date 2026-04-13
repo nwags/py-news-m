@@ -71,6 +71,15 @@ class ResolutionResult:
     local_write_performed: bool = False
     artifact_paths: list[str] | None = None
     meta_sidecar_path: str | None = None
+    resolution_mode: str | None = None
+    provider_requested: str | None = None
+    provider_used: str | None = None
+    served_from: str | None = None
+    remote_attempted: bool = False
+    rate_limited: bool = False
+    retry_count: int = 0
+    deferred_until: str | None = None
+    provider_skip_reasons: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -103,6 +112,7 @@ def resolve_article(
             strategy="none",
             message="Article not found in local metadata",
         )
+        result = _enrich_result(result, allow_remote=allow_remote, force_remote=force_remote, provider_requested=None)
         _record_event(config, result, strategy="none", artifact_path=None, provenance={"allow_remote": allow_remote})
         return result
 
@@ -116,6 +126,12 @@ def resolve_article(
             provider=provider,
             allow_remote=allow_remote,
             http_client=http_client,
+        )
+        result = _enrich_result(
+            result,
+            allow_remote=allow_remote,
+            force_remote=False,
+            provider_requested=provider or None,
         )
         _record_event(
             config,
@@ -136,6 +152,12 @@ def resolve_article(
         allow_remote=allow_remote,
         force_remote=force_remote,
         http_client=http_client,
+    )
+    result = _enrich_result(
+        result,
+        allow_remote=allow_remote,
+        force_remote=force_remote,
+        provider_requested=provider or None,
     )
     _record_event(
         config,
@@ -322,7 +344,7 @@ def _run_metadata_strategy(
     query = _build_newsdata_query(row)
     auth = resolve_newsdata_auth(rule)
     params, size = build_newsdata_params(query=query, max_records=20, auth=auth)
-    if auth.auth_type == "api_key" and not auth.auth_configured:
+    if auth.auth_type in {"api_key", "api_key_query"} and not auth.auth_configured:
         return ResolutionResult(
             article_id=article_id,
             representation="metadata",
@@ -353,6 +375,8 @@ def _run_metadata_strategy(
             message=exc.reason,
             auth_env_var=auth.auth_env_var,
             auth_configured=auth.auth_configured,
+            retry_count=max(0, int(exc.attempts) - 1),
+            rate_limited=exc.status_code == 429,
         )
 
     candidates = payload.get("results")
@@ -403,6 +427,8 @@ def _run_metadata_strategy(
         auth_env_var=auth.auth_env_var,
         auth_configured=auth.auth_configured,
         local_write_performed=True,
+        retry_count=max(0, int(getattr(client, "last_attempts", 1)) - 1),
+        rate_limited=bool(getattr(client, "last_rate_limited", False)),
     )
 
 
@@ -487,6 +513,8 @@ def _run_content_strategy(
                 strategy=strategy,
                 status_code=exc.status_code,
                 message=exc.reason,
+                retry_count=max(0, int(exc.attempts) - 1),
+                rate_limited=exc.status_code == 429,
             )
 
         content_type = _clean_optional_text(response.headers.get("Content-Type")) or ""
@@ -556,6 +584,8 @@ def _run_content_strategy(
             local_write_performed=True,
             artifact_paths=persisted["artifact_paths"],
             meta_sidecar_path=persisted["meta_sidecar_path"],
+            retry_count=max(0, int(getattr(client, "last_attempts", 1)) - 1),
+            rate_limited=bool(getattr(client, "last_rate_limited", False)),
         )
 
     return None
@@ -905,6 +935,15 @@ def _record_event(
     )
     event_id = f"evt_{hashlib.sha256(material.encode('utf-8')).hexdigest()[:20]}"
 
+    allow_remote = bool(provenance.get("allow_remote"))
+    force_remote = bool(provenance.get("force_remote"))
+    resolution_mode = result.resolution_mode or _derive_resolution_mode(allow_remote=allow_remote, force_remote=force_remote)
+    remote_attempted = bool(result.remote_attempted or _derive_remote_attempted(result=result, allow_remote=allow_remote))
+    served_from = result.served_from or _derive_served_from(result=result)
+    canonical_key = f"article:{result.article_id}"
+    provider_requested = _clean_optional_text(result.provider_requested) or _clean_optional_text(result.provider) or None
+    provider_used = _clean_optional_text(result.provider_used) or _clean_optional_text(result.provider) or None
+
     event_row = {
         "event_id": event_id,
         "event_at": event_at,
@@ -919,6 +958,21 @@ def _record_event(
         "artifact_path": artifact_path,
         "meta_sidecar_path": result.meta_sidecar_path,
         "provenance_json": json.dumps(provenance, sort_keys=True),
+        "domain": "news",
+        "content_domain": "article",
+        "canonical_key": canonical_key,
+        "resolution_mode": resolution_mode,
+        "provider_requested": provider_requested,
+        "provider_used": provider_used,
+        "method_used": strategy,
+        "served_from": served_from,
+        "remote_attempted": remote_attempted,
+        "persisted_locally": bool(result.local_write_performed),
+        "http_status": result.status_code,
+        "retry_count": int(result.retry_count),
+        "rate_limited": bool(result.rate_limited),
+        "deferred_until": result.deferred_until,
+        "latency_ms": None,
     }
     append_parquet_rows(
         path=normalized_artifact_path(config, "resolution_events"),
@@ -1058,7 +1112,69 @@ def _merge_provenance(base: dict[str, Any], result: ResolutionResult) -> dict[st
         merged["auth_env_var"] = result.auth_env_var
     if result.auth_configured is not None:
         merged["auth_configured"] = bool(result.auth_configured)
+    merged["retry_count"] = int(result.retry_count)
+    merged["rate_limited"] = bool(result.rate_limited)
+    if result.deferred_until:
+        merged["deferred_until"] = result.deferred_until
+    if result.provider_requested:
+        merged["provider_requested"] = result.provider_requested
+    if result.provider_used:
+        merged["provider_used"] = result.provider_used
+    if result.served_from:
+        merged["served_from"] = result.served_from
+    if result.provider_skip_reasons:
+        merged["provider_skip_reasons"] = result.provider_skip_reasons
     return merged
+
+
+def _enrich_result(
+    result: ResolutionResult,
+    *,
+    allow_remote: bool,
+    force_remote: bool,
+    provider_requested: str | None,
+) -> ResolutionResult:
+    result.resolution_mode = _derive_resolution_mode(allow_remote=allow_remote, force_remote=force_remote)
+    if provider_requested:
+        result.provider_requested = provider_requested
+    if result.provider and not result.provider_used:
+        result.provider_used = result.provider
+    if not result.served_from:
+        result.served_from = _derive_served_from(result=result)
+    result.remote_attempted = _derive_remote_attempted(result=result, allow_remote=allow_remote)
+    if result.provider_skip_reasons is None:
+        result.provider_skip_reasons = []
+    return result
+
+
+def _derive_resolution_mode(*, allow_remote: bool, force_remote: bool) -> str:
+    if not allow_remote:
+        return "local_only"
+    if force_remote:
+        return "refresh_if_stale"
+    return "resolve_if_missing"
+
+
+def _derive_remote_attempted(*, result: ResolutionResult, allow_remote: bool) -> bool:
+    if not allow_remote:
+        return False
+    local_sources = {"local_artifact", "local_metadata", "local_only"}
+    if result.source in local_sources:
+        return False
+    local_strategies = {"local_artifact", "local_metadata", "local_only"}
+    return (result.strategy or "") not in local_strategies
+
+
+def _derive_served_from(*, result: ResolutionResult) -> str:
+    if result.source == "local_artifact":
+        return "local_cache"
+    if result.source in {"local_metadata", "local_only"}:
+        return "local_normalized"
+    if result.local_write_performed:
+        return "remote_then_persisted"
+    if result.source in {"remote_http", "provider_api", "provider_payload"}:
+        return "remote_ephemeral"
+    return "none"
 
 
 def _utc_now() -> str:

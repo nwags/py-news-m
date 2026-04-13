@@ -2,7 +2,16 @@
 
 ## Current objective
 
-Reconciliation/Audit Tooling for Canonical Authorities vs Cache/Index State.
+Operator Maintenance / Reporting Hardening on top of implemented read-only audit/reconciliation, including deterministic operator audit bundle export.
+
+Wave 1 reference:
+- [`WAVE1_MIGRATION_NOTE.md`](WAVE1_MIGRATION_NOTE.md)
+Wave 2 reference:
+- [`WAVE2_MIGRATION_NOTE.md`](WAVE2_MIGRATION_NOTE.md)
+Wave 3 reference:
+- [`WAVE3_MIGRATION_NOTE.md`](WAVE3_MIGRATION_NOTE.md)
+Wave 4 reference:
+- [`WAVE4_MIGRATION_NOTE.md`](WAVE4_MIGRATION_NOTE.md)
 
 ## Current implemented foundation (unchanged by this phase)
 
@@ -15,7 +24,7 @@ Reconciliation/Audit Tooling for Canonical Authorities vs Cache/Index State.
 
 ## Next implementation phases (ordered)
 
-1. Operator maintenance/reporting hardening.
+1. Operator maintenance/reporting hardening (active).
 2. Augmentation-ingestion transfer/design sync from accepted `py-sec-edgar-m`.
 3. Authenticated augmentation submission/storage.
 4. Entity-aware query/read behavior using stored augmentations.

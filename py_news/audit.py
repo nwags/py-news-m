@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,22 @@ from py_news.providers import load_provider_registry
 from py_news.storage.paths import normalized_artifact_path, provider_full_index_dir_path
 
 _MAX_SAMPLE = 20
+_HUMAN_SAMPLE = 5
 _CANONICAL_ARTICLE_FILES = ("article.html", "article.txt", "article.json")
+
+_HINTS_BY_ISSUE_CODE = {
+    "missing_article_storage_mapping": "Run lookup/audit verification, then rebuild canonical cache mapping via `py-news cache rebuild-layout`.",
+    "duplicate_article_storage_mapping": "Investigate duplicate mappings, then run canonical rebuild to restore one mapping per article.",
+    "mapping_storage_missing": "Storage mapping references a missing storage row; verify storage table and rebuild canonical layout.",
+    "provider_article_map_mismatch": "Provider full-index differs from canonical state; rebuild with `py-news cache rebuild-layout`.",
+    "provider_artifact_index_mismatch": "Provider artifact index differs from canonical artifacts; rebuild with `py-news cache rebuild-layout`.",
+    "missing_provider_index_file": "Provider full-index file is missing; regenerate with canonical cache rebuild.",
+    "orphan_storage_folder": "Inspect orphan storage folder before cleanup; remove only after verification.",
+    "invalid_meta_sidecar": "Inspect and repair invalid `meta.json` sidecar in-place before any cleanup.",
+    "sidecar_mapping_conflict": "Sidecar mapped IDs differ from canonical mapping; run rebuild after confirming authority tables.",
+    "historical_tmp_or_pytest_path": "Historical provenance observation only; no action unless recently unexpected.",
+    "historical_legacy_cache_path": "Legacy historical provenance observation only; no action unless recently unexpected.",
+}
 
 
 @dataclass(slots=True)
@@ -98,6 +114,220 @@ def run_audit_article(config: AppConfig, *, article_id: str, max_sample: int = _
 
 def run_audit_provider(config: AppConfig, *, provider_id: str, max_sample: int = _MAX_SAMPLE) -> dict[str, Any]:
     return _run_audit(config, stage="audit_provider", provider_id=provider_id, max_sample=max_sample)
+
+
+def run_audit_report(config: AppConfig, *, max_sample: int = _MAX_SAMPLE) -> dict[str, Any]:
+    return _run_audit(config, stage="audit_report", max_sample=max_sample)
+
+
+def render_audit_human(payload: dict[str, Any], *, title: str, sample_limit: int = _HUMAN_SAMPLE) -> str:
+    lines: list[str] = [title, "=" * len(title)]
+    lines.extend(_render_issue_section("Hard failures", payload.get("hard_failures", []), sample_limit=sample_limit))
+    lines.extend(_render_issue_section("Warnings", payload.get("warnings", []), sample_limit=sample_limit))
+    lines.extend(_render_issue_section("Observations", payload.get("observations", []), sample_limit=sample_limit))
+
+    lines.append("Key counts")
+    lines.append("----------")
+    for key in (
+        "status",
+        "ok",
+        "generated_at",
+        "repo_root",
+        "articles_rows",
+        "lookup_rows",
+        "mapping_rows",
+        "storage_rows",
+        "artifact_rows",
+        "resolution_events_rows",
+    ):
+        if key in payload:
+            lines.append(f"{key}: {payload[key]}")
+
+    provider_counts = payload.get("provider_index_counts", {})
+    if isinstance(provider_counts, dict):
+        lines.append("provider_index_counts:")
+        if not provider_counts:
+            lines.append("  - none")
+        else:
+            for provider in sorted(provider_counts):
+                counts = provider_counts.get(provider) or {}
+                lines.append(
+                    "  - "
+                    f"{provider}: article_map_rows={counts.get('article_map_rows', 0)}, "
+                    f"artifact_index_rows={counts.get('artifact_index_rows', 0)}, "
+                    f"expected_article_map_rows={counts.get('expected_article_map_rows', 0)}, "
+                    f"expected_artifact_index_rows={counts.get('expected_artifact_index_rows', 0)}"
+                )
+
+    lines.append("Suggested next operator actions")
+    lines.append("-----------------------------")
+    action_lines = _suggested_actions(payload)
+    if action_lines:
+        lines.extend([f"- {line}" for line in action_lines])
+    else:
+        lines.append("- No action required; audit is healthy.")
+    return "\n".join(lines)
+
+
+def render_audit_compare_human(payload: dict[str, Any], *, title: str = "Audit Compare", sample_limit: int = _HUMAN_SAMPLE) -> str:
+    lines = [title, "=" * len(title)]
+    for key in ("status", "ok", "left_report", "right_report"):
+        if key in payload:
+            lines.append(f"{key}: {payload[key]}")
+
+    lines.append("Count deltas")
+    lines.append("------------")
+    count_deltas = payload.get("count_deltas", {})
+    if isinstance(count_deltas, dict):
+        for key in sorted(count_deltas):
+            lines.append(f"- {key}: {count_deltas[key]}")
+
+    for key, header in (
+        ("new_hard_failures", "New hard failures"),
+        ("resolved_hard_failures", "Resolved hard failures"),
+        ("new_warnings", "New warnings"),
+        ("resolved_warnings", "Resolved warnings"),
+    ):
+        lines.append(header)
+        lines.append("-" * len(header))
+        items = payload.get(key, [])
+        if not items:
+            lines.append("- none")
+            continue
+        for item in items[: max(1, sample_limit)]:
+            lines.append(f"- {item.get('issue_code')}: {item.get('count_delta')}")
+
+    lines.append("Observations delta")
+    lines.append("------------------")
+    obs_delta = payload.get("observations_delta", {})
+    if isinstance(obs_delta, dict):
+        for key in ("count_delta", "new_issue_codes", "resolved_issue_codes"):
+            lines.append(f"- {key}: {obs_delta.get(key)}")
+    return "\n".join(lines)
+
+
+def audit_status_brief(payload: dict[str, Any], *, max_actions: int = _HUMAN_SAMPLE) -> dict[str, Any]:
+    hard_failure_count = sum(int(item.get("count", 0) or 0) for item in payload.get("hard_failures", []))
+    warning_count = sum(int(item.get("count", 0) or 0) for item in payload.get("warnings", []))
+    observation_count = sum(int(item.get("count", 0) or 0) for item in payload.get("observations", []))
+    actions = _suggested_actions(payload)[: max(1, max_actions)]
+    return {
+        "status": payload.get("status", "ok"),
+        "ok": bool(payload.get("ok", True)),
+        "hard_failure_count": int(hard_failure_count),
+        "warning_count": int(warning_count),
+        "observation_count": int(observation_count),
+        "next_actions": actions,
+    }
+
+
+def compare_audit_reports(
+    *,
+    left_report: dict[str, Any],
+    right_report: dict[str, Any],
+    left_label: str,
+    right_label: str,
+    sample_limit: int = _HUMAN_SAMPLE,
+) -> dict[str, Any]:
+    left_hard = _issue_counts(left_report.get("hard_failures", []))
+    right_hard = _issue_counts(right_report.get("hard_failures", []))
+    left_warn = _issue_counts(left_report.get("warnings", []))
+    right_warn = _issue_counts(right_report.get("warnings", []))
+    left_obs = _issue_counts(left_report.get("observations", []))
+    right_obs = _issue_counts(right_report.get("observations", []))
+
+    count_deltas = {}
+    for key in (
+        "articles_rows",
+        "lookup_rows",
+        "mapping_rows",
+        "storage_rows",
+        "artifact_rows",
+        "resolution_events_rows",
+    ):
+        count_deltas[key] = int(right_report.get(key, 0) or 0) - int(left_report.get(key, 0) or 0)
+
+    new_hard = _added_issue_deltas(left_hard, right_hard, sample_limit=sample_limit)
+    resolved_hard = _removed_issue_deltas(left_hard, right_hard, sample_limit=sample_limit)
+    new_warn = _added_issue_deltas(left_warn, right_warn, sample_limit=sample_limit)
+    resolved_warn = _removed_issue_deltas(left_warn, right_warn, sample_limit=sample_limit)
+    obs_delta = {
+        "count_delta": int(sum(right_obs.values()) - sum(left_obs.values())),
+        "new_issue_codes": sorted(set(right_obs) - set(left_obs))[:sample_limit],
+        "resolved_issue_codes": sorted(set(left_obs) - set(right_obs))[:sample_limit],
+    }
+
+    ok = not new_hard
+    status = "ok" if ok else "warn"
+    return {
+        "stage": "audit_compare",
+        "status": status,
+        "ok": ok,
+        "left_report": left_label,
+        "right_report": right_label,
+        "count_deltas": dict(sorted(count_deltas.items())),
+        "new_hard_failures": new_hard,
+        "resolved_hard_failures": resolved_hard,
+        "new_warnings": new_warn,
+        "resolved_warnings": resolved_warn,
+        "observations_delta": obs_delta,
+    }
+
+
+def render_audit_report_ndjson(payload: dict[str, Any], *, sample_limit: int = _MAX_SAMPLE) -> str:
+    lines: list[str] = []
+    summary = {
+        "record_type": "summary",
+        "stage": payload.get("stage"),
+        "generated_at": payload.get("generated_at"),
+        "status": payload.get("status"),
+        "ok": payload.get("ok"),
+        "repo_root": payload.get("repo_root"),
+    }
+    lines.append(json.dumps(summary, sort_keys=True))
+
+    key_counts = {
+        "record_type": "key_counts",
+        "articles_rows": payload.get("articles_rows", 0),
+        "lookup_rows": payload.get("lookup_rows", 0),
+        "mapping_rows": payload.get("mapping_rows", 0),
+        "storage_rows": payload.get("storage_rows", 0),
+        "artifact_rows": payload.get("artifact_rows", 0),
+        "resolution_events_rows": payload.get("resolution_events_rows", 0),
+    }
+    lines.append(json.dumps(key_counts, sort_keys=True))
+
+    for bucket in ("hard_failures", "warnings", "observations"):
+        items = payload.get(bucket, [])
+        for item in items:
+            lines.append(
+                json.dumps(
+                    {
+                        "record_type": "issue_bucket",
+                        "bucket": bucket,
+                        "issue_code": item.get("issue_code"),
+                        "count": int(item.get("count", 0)),
+                        "sample_ids": list(item.get("sample_ids", []))[:sample_limit],
+                        "sample_paths": list(item.get("sample_paths", []))[:sample_limit],
+                    },
+                    sort_keys=True,
+                )
+            )
+
+    provider_counts = payload.get("provider_index_counts", {})
+    if isinstance(provider_counts, dict):
+        for provider in sorted(provider_counts):
+            lines.append(
+                json.dumps(
+                    {
+                        "record_type": "provider_index_status",
+                        "provider": provider,
+                        **(provider_counts.get(provider) or {}),
+                    },
+                    sort_keys=True,
+                )
+            )
+    return "\n".join(lines)
 
 
 def _run_audit(
@@ -175,7 +405,9 @@ def _run_audit(
 
     payload: dict[str, Any] = {
         "stage": stage,
+        "generated_at": _utc_now_iso(),
         "ok": hard.total_count() == 0,
+        "repo_root": str(config.project_root.resolve()),
         "articles_rows": int(len(articles)),
         "lookup_rows": int(len(lookup)),
         "mapping_rows": int(len(mapping)),
@@ -211,6 +443,77 @@ def _run_audit(
     has_warn = bool(payload["warnings"])
     payload["status"] = "fail" if has_hard else ("warn" if has_warn else "ok")
     return payload
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _render_issue_section(header: str, items: list[dict[str, Any]], *, sample_limit: int) -> list[str]:
+    lines = [header, "-" * len(header)]
+    if not items:
+        lines.append("- none")
+        return lines
+    for item in items:
+        code = str(item.get("issue_code") or "")
+        count = int(item.get("count", 0))
+        lines.append(f"- {code} (count={count})")
+        ids = list(item.get("sample_ids") or [])[: max(1, sample_limit)]
+        paths = list(item.get("sample_paths") or [])[: max(1, sample_limit)]
+        if ids:
+            lines.append(f"  sample_ids: {ids}")
+        if paths:
+            lines.append(f"  sample_paths: {paths}")
+        hint = _HINTS_BY_ISSUE_CODE.get(code)
+        if hint:
+            lines.append(f"  hint: {hint}")
+    return lines
+
+
+def _suggested_actions(payload: dict[str, Any]) -> list[str]:
+    codes = []
+    for bucket in ("hard_failures", "warnings"):
+        items = payload.get(bucket, [])
+        for item in items:
+            code = str(item.get("issue_code") or "")
+            if code:
+                codes.append(code)
+    suggestions = []
+    for code in sorted(set(codes)):
+        hint = _HINTS_BY_ISSUE_CODE.get(code)
+        if hint:
+            suggestions.append(hint)
+    return suggestions[:_HUMAN_SAMPLE]
+
+
+def _issue_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in items:
+        code = str(item.get("issue_code") or "").strip()
+        if not code:
+            continue
+        out[code] = int(item.get("count", 0) or 0)
+    return dict(sorted(out.items()))
+
+
+def _added_issue_deltas(left: dict[str, int], right: dict[str, int], *, sample_limit: int) -> list[dict[str, Any]]:
+    out = []
+    for code in sorted(right):
+        if code not in left:
+            out.append({"issue_code": code, "count_delta": int(right[code])})
+        elif right[code] > left[code]:
+            out.append({"issue_code": code, "count_delta": int(right[code] - left[code])})
+    return out[: max(1, sample_limit)]
+
+
+def _removed_issue_deltas(left: dict[str, int], right: dict[str, int], *, sample_limit: int) -> list[dict[str, Any]]:
+    out = []
+    for code in sorted(left):
+        if code not in right:
+            out.append({"issue_code": code, "count_delta": int(left[code])})
+        elif left[code] > right[code]:
+            out.append({"issue_code": code, "count_delta": int(left[code] - right[code])})
+    return out[: max(1, sample_limit)]
 
 
 def _load_authorities(config: AppConfig, *, hard: _IssueBucket) -> dict[str, pd.DataFrame]:
